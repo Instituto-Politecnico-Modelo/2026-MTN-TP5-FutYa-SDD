@@ -1,0 +1,1294 @@
+openapi: "3.0.3"
+info:
+  title: FutYa API
+  description: |
+    API REST de la plataforma FutYa para la gestión de complejos de fútbol 5.
+    Todos los endpoints protegidos requieren un token JWT en el header `Authorization: Bearer {token}`.
+    Los roles disponibles son `CLIENTE` y `ADMINISTRADOR`.
+  version: "1.0.0"
+  contact:
+    name: FutYa Dev Team
+
+servers:
+  - url: http://localhost:8081
+    description: Backend local (Spring Boot)
+  - url: http://localhost:5173/api
+    description: Proxy Vite dev-server (recomendado para frontend)
+
+tags:
+  - name: Autenticación
+    description: Registro, login y logout (CU1, CU2, CU3)
+  - name: Disponibilidad
+    description: Grilla de turnos por fecha y cancha (CU4)
+  - name: Reservas – Cliente
+    description: Crear, consultar y cancelar reservas propias (CU5, CU6, CU7)
+  - name: Canchas – Admin
+    description: ABM de canchas y cambio de estado (CU8, CU9, CU10, CU11)
+  - name: Turnos – Admin
+    description: ABM de turnos y cambio de disponibilidad (CU12, CU13, CU14, CU15)
+  - name: Usuarios – Admin
+    description: Listado de usuarios e historial de reservas (CU16, CU17)
+  - name: Reservas – Admin
+    description: Visualización global y cancelación administrativa de reservas
+  - name: Pagos
+    description: Inicio de pago con Mercado Pago y recepción de webhook
+  - name: Clima
+    description: Proxy server-side a OpenWeatherMap
+
+security:
+  - BearerAuth: []
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PATHS
+# ─────────────────────────────────────────────────────────────────────────────
+paths:
+
+  # ── AUTENTICACIÓN ──────────────────────────────────────────────────────────
+
+  /api/auth/registro:
+    post:
+      tags: [Autenticación]
+      summary: Registrar nuevo usuario (CU1)
+      description: Crea una cuenta con rol CLIENTE. No requiere autenticación.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegistroRequest'
+      responses:
+        "201":
+          description: Usuario creado exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsuarioResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "409":
+          description: Email o DNI ya registrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/login:
+    post:
+      tags: [Autenticación]
+      summary: Iniciar sesión y obtener JWT (CU2)
+      description: Autentica las credenciales y devuelve un token JWT. No requiere autenticación previa.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        "200":
+          description: Login exitoso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        "401":
+          description: Credenciales inválidas (mensaje genérico — sin revelar si el email existe)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/logout:
+    post:
+      tags: [Autenticación]
+      summary: Cerrar sesión (CU3)
+      description: |
+        Invalida la sesión del lado del cliente. La invalidación del token JWT
+        en el servidor es client-side en implementaciones stateless; este endpoint
+        registra el evento de logout y puede usarse para blacklisting si se implementa.
+      responses:
+        "204":
+          description: Sesión cerrada correctamente
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── DISPONIBILIDAD ─────────────────────────────────────────────────────────
+
+  /api/disponibilidad:
+    get:
+      tags: [Disponibilidad]
+      summary: Consultar grilla de disponibilidad (CU4)
+      description: |
+        Devuelve todos los turnos habilitados para la fecha solicitada,
+        indicando si cada uno ya está reservado o está disponible.
+        Los turnos de canchas inactivas no aparecen en el resultado.
+      parameters:
+        - name: fecha
+          in: query
+          required: true
+          description: Fecha en formato ISO 8601 (YYYY-MM-DD)
+          schema:
+            type: string
+            format: date
+            example: "2026-07-10"
+        - name: canchaId
+          in: query
+          required: false
+          description: Filtrar por cancha específica (opcional)
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: Grilla de disponibilidad para la fecha solicitada
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DisponibilidadItem'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── RESERVAS – CLIENTE ─────────────────────────────────────────────────────
+
+  /api/reservas:
+    post:
+      tags: [Reservas – Cliente]
+      summary: Crear reserva (CU5)
+      description: |
+        Crea una nueva reserva para el turno y fecha indicados.
+        El turno debe estar disponible y no reservado para esa fecha.
+        Responde con la reserva creada en estado PENDIENTE junto con la URL
+        de redirección al checkout de Mercado Pago.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReservaRequest'
+      responses:
+        "201":
+          description: Reserva creada en estado PENDIENTE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservaConPagoResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "409":
+          description: El turno ya está reservado para esa fecha
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/reservas/mis-reservas:
+    get:
+      tags: [Reservas – Cliente]
+      summary: Ver mis reservas (CU6)
+      description: Devuelve todas las reservas del usuario autenticado, ordenadas por fecha descendente.
+      parameters:
+        - name: estado
+          in: query
+          required: false
+          description: Filtrar por estado de reserva
+          schema:
+            $ref: '#/components/schemas/EstadoReserva'
+      responses:
+        "200":
+          description: Lista de reservas del cliente
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReservaResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/reservas/{id}/cancelar:
+    patch:
+      tags: [Reservas – Cliente]
+      summary: Cancelar reserva propia (CU7)
+      description: |
+        Cancela una reserva del usuario autenticado.
+        - Con más de 24 horas de anticipación: cancela y procesa reembolso completo.
+        - Con menos de 24 horas de anticipación: cancela sin reembolso.
+        No permite cancelar reservas pasadas ni reservas de otros usuarios.
+      parameters:
+        - $ref: '#/components/parameters/ReservaId'
+      responses:
+        "200":
+          description: Reserva cancelada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservaResponse'
+        "400":
+          description: La reserva no puede cancelarse (ya pasó o fuera de plazo válido)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  # ── CANCHAS – ADMIN ────────────────────────────────────────────────────────
+
+  /api/admin/canchas:
+    get:
+      tags: [Canchas – Admin]
+      summary: Listar todas las canchas (CU8)
+      description: Devuelve todas las canchas registradas, activas e inactivas.
+      responses:
+        "200":
+          description: Lista de canchas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CanchaResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Canchas – Admin]
+      summary: Crear cancha (CU8)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CanchaRequest'
+      responses:
+        "201":
+          description: Cancha creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CanchaResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /api/admin/canchas/{id}:
+    put:
+      tags: [Canchas – Admin]
+      summary: Modificar cancha (CU9)
+      parameters:
+        - $ref: '#/components/parameters/CanchaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CanchaRequest'
+      responses:
+        "200":
+          description: Cancha actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CanchaResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Canchas – Admin]
+      summary: Eliminar cancha (CU10)
+      description: Solo permite eliminar canchas sin reservas futuras activas.
+      parameters:
+        - $ref: '#/components/parameters/CanchaId'
+      responses:
+        "204":
+          description: Cancha eliminada
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          description: La cancha tiene reservas futuras activas y no puede eliminarse
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorConReservasResponse'
+
+  /api/admin/canchas/{id}/estado:
+    patch:
+      tags: [Canchas – Admin]
+      summary: Activar o desactivar cancha (CU11)
+      parameters:
+        - $ref: '#/components/parameters/CanchaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EstadoCanchaRequest'
+      responses:
+        "200":
+          description: Estado de la cancha actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CanchaResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  # ── TURNOS – ADMIN ─────────────────────────────────────────────────────────
+
+  /api/admin/turnos:
+    get:
+      tags: [Turnos – Admin]
+      summary: Listar turnos (CU12)
+      parameters:
+        - name: canchaId
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+          description: Filtrar por cancha
+      responses:
+        "200":
+          description: Lista de turnos
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TurnoResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Turnos – Admin]
+      summary: Crear turno (CU12)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TurnoRequest'
+      responses:
+        "201":
+          description: Turno creado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnoResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /api/admin/turnos/{id}:
+    put:
+      tags: [Turnos – Admin]
+      summary: Modificar turno (CU13)
+      parameters:
+        - $ref: '#/components/parameters/TurnoId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TurnoRequest'
+      responses:
+        "200":
+          description: Turno actualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnoResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          description: El turno tiene reservas activas y no puede modificarse
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      tags: [Turnos – Admin]
+      summary: Eliminar turno (CU14)
+      parameters:
+        - $ref: '#/components/parameters/TurnoId'
+      responses:
+        "204":
+          description: Turno eliminado
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+        "409":
+          description: El turno tiene reservas activas y no puede eliminarse
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/admin/turnos/{id}/disponibilidad:
+    patch:
+      tags: [Turnos – Admin]
+      summary: Habilitar o deshabilitar turno (CU15)
+      parameters:
+        - $ref: '#/components/parameters/TurnoId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DisponibilidadTurnoRequest'
+      responses:
+        "200":
+          description: Disponibilidad del turno actualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnoResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  # ── USUARIOS – ADMIN ───────────────────────────────────────────────────────
+
+  /api/admin/usuarios:
+    get:
+      tags: [Usuarios – Admin]
+      summary: Listar todos los usuarios (CU16)
+      description: Devuelve el listado completo de usuarios registrados con rol CLIENTE.
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Lista paginada de usuarios
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PageUsuarioResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /api/admin/usuarios/{id}/reservas:
+    get:
+      tags: [Usuarios – Admin]
+      summary: Ver historial de reservas de un usuario (CU17)
+      parameters:
+        - $ref: '#/components/parameters/UsuarioId'
+        - name: estado
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/EstadoReserva'
+      responses:
+        "200":
+          description: Historial de reservas del usuario
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReservaResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  # ── RESERVAS – ADMIN ───────────────────────────────────────────────────────
+
+  /api/admin/reservas:
+    get:
+      tags: [Reservas – Admin]
+      summary: Listar todas las reservas
+      description: Permite filtrar por fecha, cancha y usuario.
+      parameters:
+        - name: fecha
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: canchaId
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+        - name: usuarioId
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+        - name: estado
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/EstadoReserva'
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Lista filtrada de reservas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PageReservaResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+
+  /api/admin/reservas/{id}/cancelar:
+    patch:
+      tags: [Reservas – Admin]
+      summary: Cancelar reserva de cualquier cliente (Admin)
+      description: |
+        El administrador cancela una reserva activa. Se requiere un motivo.
+        El cliente recibe notificación por email con el motivo de la cancelación.
+        La acción queda registrada en el historial con `cancelado_por_admin = true`.
+      parameters:
+        - $ref: '#/components/parameters/ReservaId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelacionAdminRequest'
+      responses:
+        "200":
+          description: Reserva cancelada por el administrador
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReservaResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Forbidden'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  # ── PAGOS ──────────────────────────────────────────────────────────────────
+
+  /api/pagos/iniciar:
+    post:
+      tags: [Pagos]
+      summary: Iniciar pago con Mercado Pago
+      description: |
+        Crea una preferencia de pago en Mercado Pago para la reserva indicada
+        y devuelve la URL de redirección al checkout.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PagoIniciarRequest'
+      responses:
+        "200":
+          description: Preferencia de pago creada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PagoIniciarResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /api/pagos/webhook:
+    post:
+      tags: [Pagos]
+      summary: Webhook de notificación de Mercado Pago
+      description: |
+        Recibe notificaciones asíncronas de Mercado Pago sobre el resultado de los pagos.
+        **No requiere autenticación JWT** (llamado por Mercado Pago, no por el frontend).
+        Valida la firma HMAC en el header `x-signature` para prevenir fraude.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookNotification'
+      responses:
+        "200":
+          description: Notificación procesada
+        "400":
+          description: Firma inválida o payload malformado
+
+  # ── CLIMA ──────────────────────────────────────────────────────────────────
+
+  /api/clima:
+    get:
+      tags: [Clima]
+      summary: Consultar pronóstico del clima para un turno
+      description: |
+        Devuelve las condiciones meteorológicas previstas para la fecha y hora indicadas,
+        consultando OpenWeatherMap server-side. Si el servicio externo no está disponible,
+        devuelve `disponible: false` sin interrumpir el flujo de reserva.
+      parameters:
+        - name: fecha
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+            example: "2026-07-10"
+        - name: hora
+          in: query
+          required: true
+          description: Hora de inicio del turno en formato HH:mm
+          schema:
+            type: string
+            example: "18:00"
+      responses:
+        "200":
+          description: Información del clima (puede incluir disponible=false si hay error externo)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClimaResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPONENTS
+# ─────────────────────────────────────────────────────────────────────────────
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token JWT obtenido en POST /api/auth/login
+
+  parameters:
+    CanchaId:
+      name: id
+      in: path
+      required: true
+      description: ID de la cancha
+      schema:
+        type: integer
+        format: int64
+    TurnoId:
+      name: id
+      in: path
+      required: true
+      description: ID del turno
+      schema:
+        type: integer
+        format: int64
+    ReservaId:
+      name: id
+      in: path
+      required: true
+      description: ID de la reserva
+      schema:
+        type: integer
+        format: int64
+    UsuarioId:
+      name: id
+      in: path
+      required: true
+      description: ID del usuario
+      schema:
+        type: integer
+        format: int64
+
+  responses:
+    BadRequest:
+      description: Datos de entrada inválidos
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Token JWT ausente o expirado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: El rol del usuario no tiene permiso para esta operación
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Recurso no encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+
+    # ── Enumerados ────────────────────────────────────────────────────────────
+
+    Rol:
+      type: string
+      enum: [CLIENTE, ADMINISTRADOR]
+
+    EstadoReserva:
+      type: string
+      enum: [PENDIENTE, CONFIRMADA, CANCELADA]
+
+    EstadoPago:
+      type: string
+      enum: [PENDIENTE, CONFIRMADO, RECHAZADO, REEMBOLSADO]
+
+    DiaSemana:
+      type: string
+      enum: [LUNES, MARTES, MIERCOLES, JUEVES, VIERNES, SABADO, DOMINGO]
+
+    TipoCancha:
+      type: string
+      enum: [FUTBOL_5, FUTBOL_7, FUTBOL_11]
+
+    # ── Auth ──────────────────────────────────────────────────────────────────
+
+    RegistroRequest:
+      type: object
+      required: [dni, nombre, apellido, email, password]
+      properties:
+        dni:
+          type: string
+          minLength: 7
+          maxLength: 20
+          example: "30123456"
+        nombre:
+          type: string
+          minLength: 2
+          maxLength: 100
+          example: "Juan"
+        apellido:
+          type: string
+          minLength: 2
+          maxLength: 100
+          example: "Pérez"
+        email:
+          type: string
+          format: email
+          example: "juan.perez@email.com"
+        password:
+          type: string
+          minLength: 8
+          maxLength: 72
+          format: password
+          example: "MiClave123!"
+        telefono:
+          type: string
+          maxLength: 20
+          example: "+54 11 1234-5678"
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          example: "juan.perez@email.com"
+        password:
+          type: string
+          format: password
+          example: "MiClave123!"
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT de sesión
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+        tipo:
+          type: string
+          example: "Bearer"
+        email:
+          type: string
+          example: "juan.perez@email.com"
+        rol:
+          $ref: '#/components/schemas/Rol'
+
+    # ── Usuario ───────────────────────────────────────────────────────────────
+
+    UsuarioResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        dni:
+          type: string
+          example: "30123456"
+        nombre:
+          type: string
+          example: "Juan"
+        apellido:
+          type: string
+          example: "Pérez"
+        email:
+          type: string
+          example: "juan.perez@email.com"
+        telefono:
+          type: string
+          nullable: true
+          example: "+54 11 1234-5678"
+        rol:
+          $ref: '#/components/schemas/Rol'
+        activo:
+          type: boolean
+          example: true
+
+    PageUsuarioResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsuarioResponse'
+        totalElements:
+          type: integer
+          example: 42
+        totalPages:
+          type: integer
+          example: 3
+        page:
+          type: integer
+          example: 0
+        size:
+          type: integer
+          example: 20
+
+    # ── Cancha ────────────────────────────────────────────────────────────────
+
+    CanchaRequest:
+      type: object
+      required: [nombre, tipo]
+      properties:
+        nombre:
+          type: string
+          minLength: 2
+          maxLength: 100
+          example: "Cancha 1"
+        tipo:
+          $ref: '#/components/schemas/TipoCancha'
+        descripcion:
+          type: string
+          maxLength: 1000
+          nullable: true
+          example: "Cancha principal techada con iluminación LED"
+        activa:
+          type: boolean
+          default: true
+          example: true
+
+    CanchaResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1
+        nombre:
+          type: string
+          example: "Cancha 1"
+        tipo:
+          $ref: '#/components/schemas/TipoCancha'
+        descripcion:
+          type: string
+          nullable: true
+        activa:
+          type: boolean
+          example: true
+
+    EstadoCanchaRequest:
+      type: object
+      required: [activa]
+      properties:
+        activa:
+          type: boolean
+          example: false
+
+    # ── Turno ─────────────────────────────────────────────────────────────────
+
+    TurnoRequest:
+      type: object
+      required: [diaSemana, horaInicio, horaFin, canchaId]
+      properties:
+        diaSemana:
+          $ref: '#/components/schemas/DiaSemana'
+        horaInicio:
+          type: string
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+          example: "18:00"
+        horaFin:
+          type: string
+          pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+          example: "19:00"
+        disponible:
+          type: boolean
+          default: true
+        canchaId:
+          type: integer
+          format: int64
+          example: 1
+
+    TurnoResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 5
+        diaSemana:
+          $ref: '#/components/schemas/DiaSemana'
+        horaInicio:
+          type: string
+          example: "18:00"
+        horaFin:
+          type: string
+          example: "19:00"
+        disponible:
+          type: boolean
+          example: true
+        cancha:
+          $ref: '#/components/schemas/CanchaResponse'
+
+    DisponibilidadTurnoRequest:
+      type: object
+      required: [disponible]
+      properties:
+        disponible:
+          type: boolean
+          example: false
+
+    # ── Disponibilidad ────────────────────────────────────────────────────────
+
+    DisponibilidadItem:
+      type: object
+      description: Estado de un turno en una fecha específica
+      properties:
+        turnoId:
+          type: integer
+          format: int64
+          example: 5
+        canchaId:
+          type: integer
+          format: int64
+          example: 1
+        canchaNombre:
+          type: string
+          example: "Cancha 1"
+        canchaTipo:
+          $ref: '#/components/schemas/TipoCancha'
+        diaSemana:
+          $ref: '#/components/schemas/DiaSemana'
+        horaInicio:
+          type: string
+          example: "18:00"
+        horaFin:
+          type: string
+          example: "19:00"
+        reservado:
+          type: boolean
+          description: true si ya existe una reserva PENDIENTE o CONFIRMADA para este turno en la fecha solicitada
+          example: false
+
+    # ── Reserva ───────────────────────────────────────────────────────────────
+
+    ReservaRequest:
+      type: object
+      required: [turnoId, fecha]
+      properties:
+        turnoId:
+          type: integer
+          format: int64
+          example: 5
+        fecha:
+          type: string
+          format: date
+          example: "2026-07-14"
+
+    ReservaResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 12
+        fecha:
+          type: string
+          format: date
+          example: "2026-07-14"
+        estado:
+          $ref: '#/components/schemas/EstadoReserva'
+        motivoCancelacion:
+          type: string
+          nullable: true
+        canceladoPorAdmin:
+          type: boolean
+          example: false
+        fechaCreacion:
+          type: string
+          format: date-time
+        fechaModificacion:
+          type: string
+          format: date-time
+          nullable: true
+        turno:
+          $ref: '#/components/schemas/TurnoResponse'
+        usuario:
+          $ref: '#/components/schemas/UsuarioResponse'
+        pago:
+          $ref: '#/components/schemas/PagoResponse'
+          nullable: true
+
+    ReservaConPagoResponse:
+      allOf:
+        - $ref: '#/components/schemas/ReservaResponse'
+        - type: object
+          properties:
+            pagoRedirectUrl:
+              type: string
+              format: uri
+              description: URL de redirección al checkout de Mercado Pago
+              example: "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=..."
+
+    PageReservaResponse:
+      type: object
+      properties:
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReservaResponse'
+        totalElements:
+          type: integer
+        totalPages:
+          type: integer
+        page:
+          type: integer
+        size:
+          type: integer
+
+    CancelacionAdminRequest:
+      type: object
+      required: [motivo]
+      properties:
+        motivo:
+          type: string
+          minLength: 10
+          maxLength: 500
+          example: "Mantenimiento urgente de la cancha"
+
+    # ── Pago ──────────────────────────────────────────────────────────────────
+
+    PagoResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 8
+        monto:
+          type: number
+          format: double
+          example: 2500.00
+        moneda:
+          type: string
+          example: "ARS"
+        estado:
+          $ref: '#/components/schemas/EstadoPago'
+        referenciaExterna:
+          type: string
+          nullable: true
+          description: ID del pago en Mercado Pago
+          example: "1234567890"
+        fechaTransaccion:
+          type: string
+          format: date-time
+          nullable: true
+
+    PagoIniciarRequest:
+      type: object
+      required: [reservaId]
+      properties:
+        reservaId:
+          type: integer
+          format: int64
+          example: 12
+
+    PagoIniciarResponse:
+      type: object
+      properties:
+        preferenceId:
+          type: string
+          example: "1234567890-abcdef12-3456-7890-abcdef123456"
+        redirectUrl:
+          type: string
+          format: uri
+          description: URL de redirección al checkout de Mercado Pago (init_point)
+          example: "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=..."
+
+    WebhookNotification:
+      type: object
+      description: Payload de notificación enviado por Mercado Pago
+      properties:
+        id:
+          type: integer
+          description: ID de la notificación
+        type:
+          type: string
+          description: Tipo de notificación (ej. "payment")
+          example: "payment"
+        data:
+          type: object
+          properties:
+            id:
+              type: string
+              description: ID del pago en Mercado Pago
+              example: "1234567890"
+
+    # ── Clima ─────────────────────────────────────────────────────────────────
+
+    ClimaResponse:
+      type: object
+      properties:
+        disponible:
+          type: boolean
+          description: false si el servicio externo no está disponible
+          example: true
+        fecha:
+          type: string
+          format: date
+          example: "2026-07-10"
+        hora:
+          type: string
+          example: "18:00"
+        temperatura:
+          type: number
+          format: float
+          description: Temperatura en °C
+          example: 12.5
+          nullable: true
+        descripcion:
+          type: string
+          description: Descripción textual del clima
+          example: "Parcialmente nublado"
+          nullable: true
+        iconoCodigo:
+          type: string
+          description: Código de ícono de OpenWeatherMap para uso en la UI
+          example: "03d"
+          nullable: true
+        probabilidadLluvia:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          description: Probabilidad de precipitación (0.0 a 1.0)
+          example: 0.15
+          nullable: true
+
+    # ── Error ─────────────────────────────────────────────────────────────────
+
+    ErrorResponse:
+      type: object
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        status:
+          type: integer
+          example: 400
+        error:
+          type: string
+          example: "Bad Request"
+        mensaje:
+          type: string
+          example: "El campo 'email' no es un correo electrónico válido"
+
+    ErrorConReservasResponse:
+      allOf:
+        - $ref: '#/components/schemas/ErrorResponse'
+        - type: object
+          properties:
+            reservasEnConflicto:
+              type: array
+              description: IDs de las reservas futuras que impiden la operación
+              items:
+                type: integer
+                format: int64
+              example: [12, 15, 20]
