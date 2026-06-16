@@ -425,5 +425,5 @@ docker run -p 8090:8080 \
 | SC-001 | Flujo de reserva completo < 3 min | Cronometrar desde grilla hasta notificación recibida |
 | SC-002 | Grilla carga < 2 s | Abrir DevTools → Network → verificar tiempo de `GET /api/disponibilidad` |
 | SC-003 | Solo una reserva por turno+fecha | Ejecutar dos `POST /api/reservas` paralelos con los mismos datos; el segundo debe devolver HTTP 409 |
-| SC-004 | Notificación < 30 s post-pago | Confirmar pago en sandbox de MP y medir hasta recibir el email |
+| SC-004 | Notificación < 30 s post-pago (Post-MVP) | Diferido fuera del alcance del MVP actual |
 | SC-006 | Operaciones < 5 s | Observar tiempos de respuesta en DevTools o logs de Spring Boot |

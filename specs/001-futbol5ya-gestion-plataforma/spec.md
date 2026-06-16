@@ -110,6 +110,8 @@ Un cliente selecciona un turno disponible, visualiza las condiciones del clima p
 
 Un cliente visualiza sus reservas activas y pasadas, puede modificar una reserva futura dentro del plazo permitido y cancelar una reserva con la antelación requerida.
 
+> Nota de alcance MVP (TP): en la entrega MVP se implementan visualización y cancelación de reservas. La modificación de reservas queda planificada para una iteración posterior.
+
 **Why this priority**: La auto-gestión reduce la carga operacional del administrador y mejora la experiencia del cliente al darle control sobre sus compromisos.
 
 **Independent Test**: Acceder al panel de reservas de un cliente, modificar la fecha de una reserva futura válida y cancelar otra dentro del plazo, verificando que la grilla se actualiza correctamente en ambos casos.
@@ -117,11 +119,11 @@ Un cliente visualiza sus reservas activas y pasadas, puede modificar una reserva
 **Acceptance Scenarios**:
 
 1. **Given** un cliente autenticado con reservas, **When** accede a su sección de reservas, **Then** visualiza un listado de reservas futuras y pasadas con fecha, cancha, estado y monto.
-2. **Given** una reserva futura dentro del plazo de modificación, **When** el cliente elige un nuevo turno disponible, **Then** el turno anterior se libera y el nuevo queda reservado, emitiendo notificación del cambio.
+2. **Given** una reserva futura dentro del plazo de modificación (post-MVP), **When** el cliente elige un nuevo turno disponible, **Then** el turno anterior se libera y el nuevo queda reservado, emitiendo notificación del cambio.
 3. **Given** una reserva futura con más de 24 horas de anticipación al horario del turno, **When** el cliente la cancela, **Then** el turno se libera, se procesa el reembolso completo al método de pago original y se envía notificación de cancelación con el detalle del reembolso.
 4. **Given** una reserva futura con menos de 24 horas de anticipación al horario del turno, **When** el cliente intenta cancelarla, **Then** el sistema informa que no aplica reembolso en ese plazo; si el cliente confirma la cancelación, el turno se libera sin reembolso y se envía notificación.
 5. **Given** una reserva pasada o cuyo turno ya ha ocurrido, **When** el cliente intenta modificarla o cancelarla, **Then** el sistema deniega la operación con un mensaje explicativo.
-5. **Given** una reserva activa, **When** el cliente accede al detalle, **Then** puede visualizar el comprobante de pago asociado.
+6. **Given** una reserva activa, **When** el cliente accede al detalle, **Then** puede visualizar el comprobante de pago asociado.
 
 ---
 
@@ -196,8 +198,8 @@ Un administrador visualiza todos los usuarios registrados, sus reservas, y puede
 - **FR-021**: Ante rechazo del pago, el sistema DEBE mantener el turno como disponible y presentar al cliente opciones de reintento.
 - **FR-022**: Ante timeout de la pasarela de pagos, la reserva DEBE quedar en estado "pendiente de pago" y el turno DEBE liberarse automáticamente si el pago no se confirma dentro de un período máximo configurable.
 - **FR-023**: El sistema DEBE garantizar que ante reservas simultáneas del mismo turno, solo una se confirme exitosamente (control de concurrencia).
-- **FR-024**: El sistema DEBE enviar una notificación de confirmación al cliente dentro de los 30 segundos posteriores a una reserva exitosa.
-- **FR-025**: El sistema DEBE permitir al CLIENTE modificar una reserva futura dentro del plazo permitido, requiriendo selección de un nuevo turno disponible.
+- **FR-024**: El sistema DEBE enviar una notificación de confirmación al cliente dentro de los 30 segundos posteriores a una reserva exitosa. **(Post-MVP)**
+- **FR-025**: El sistema DEBE permitir al CLIENTE modificar una reserva futura dentro del plazo permitido, requiriendo selección de un nuevo turno disponible. **(Post-MVP)**
 - **FR-026**: El sistema DEBE permitir al CLIENTE cancelar una reserva futura dentro del plazo de cancelación definido, gestionando el reembolso según la política vigente.
 - **FR-027**: El sistema DEBE impedir modificaciones o cancelaciones sobre reservas pasadas o fuera del plazo permitido.
 - **FR-028**: El sistema DEBE generar y mantener accesible un comprobante de pago por cada reserva confirmada.
@@ -222,12 +224,11 @@ Un administrador visualiza todos los usuarios registrados, sus reservas, y puede
 ### Key Entities
 
 - **Usuario**: Persona registrada en la plataforma. Atributos: identificador único, nombre, email, contraseña (almacenada con hash), rol (CLIENTE | ADMINISTRADOR), estado de cuenta (activa/inactiva), fecha de registro.
-- **Cancha**: Espacio físico de juego. Atributos: identificador, nombre, tipo de cancha, estado (activa/inactiva). Relación: tiene muchos BloqueHorario.
-- **BloqueHorario**: Plantilla recurrente de disponibilidad. Atributos: cancha asociada, día de la semana, hora de inicio, hora de fin. No representa una fecha concreta.
-- **Turno**: Instancia concreta de un BloqueHorario para una fecha específica. Atributos: cancha, fecha, hora de inicio, hora de fin, estado (disponible/reservado/cancelado/bloqueado).
-- **Reserva**: Asociación entre un Cliente y un Turno. Atributos: cliente, turno, fecha de creación, estado (pendiente de pago/activa/modificada/cancelada por cliente/cancelada por admin/vencida), referencia al pago, motivo de cancelación (si aplica).
+- **Cancha**: Espacio físico de juego. Atributos: identificador, nombre, tipo de cancha, estado (activa/inactiva). Relación: tiene muchos Turnos.
+- **Turno**: Plantilla recurrente de disponibilidad. Atributos: cancha asociada, día de la semana, hora de inicio, hora de fin, estado de habilitación. No representa una fecha concreta.
+- **Reserva**: Instancia concreta de un Turno para una fecha específica y asociación con un Cliente. Atributos: cliente, turno, fecha, fecha de creación, estado (pendiente de pago/activa/cancelada), referencia al pago, motivo de cancelación (si aplica).
 - **Pago**: Registro del cobro de una Reserva. Atributos: reserva asociada, monto, moneda, estado (pendiente/confirmado/rechazado/reembolsado), referencia externa de la pasarela, fecha de transacción.
-- **Notificación**: Mensaje enviado a un usuario en un evento del sistema. Atributos: destinatario, tipo de evento (confirmación/modificación/cancelación/etc.), contenido, fecha de envío, estado de entrega.
+- **Notificación**: Mensaje enviado a un usuario en un evento del sistema. Atributos: destinatario, tipo de evento (confirmación/modificación/cancelación/etc.), contenido, fecha de envío, estado de entrega. **(Post-MVP)**
 
 ---
 
@@ -238,7 +239,7 @@ Un administrador visualiza todos los usuarios registrados, sus reservas, y puede
 - **SC-001**: Un cliente puede completar el flujo completo de reserva (selección → clima → pago → confirmación) en menos de 3 minutos desde el inicio hasta recibir la notificación.
 - **SC-002**: La grilla de disponibilidad se carga completamente en menos de 2 segundos en condiciones de carga nominal (hasta 100 usuarios concurrentes).
 - **SC-003**: El 100% de los intentos de reserva simultánea del mismo turno resultan en, como máximo, una reserva confirmada (integridad garantizada sin duplicados).
-- **SC-004**: Las notificaciones de confirmación de reserva son entregadas al cliente en menos de 30 segundos tras la confirmación del pago.
+- **SC-004**: Las notificaciones de confirmación de reserva son entregadas al cliente en menos de 30 segundos tras la confirmación del pago. **(Post-MVP)**
 - **SC-005**: El sistema soporta al menos 100 usuarios concurrentes visualizando la grilla sin degradación perceptible del tiempo de respuesta.
 - **SC-006**: El 95% de las operaciones de reserva y cancelación se completan en menos de 5 segundos de extremo a extremo.
 - **SC-007**: Los administradores pueden localizar cualquier reserva aplicando filtros disponibles en menos de 10 segundos.
@@ -271,3 +272,8 @@ Los siguientes elementos están explícitamente excluidos del alcance de esta es
 - Implementación de tienda online de camisetas u otros productos del complejo.
 - Soporte para múltiples zonas horarias o múltiples sedes en esta versión inicial.
 - Notificaciones push o SMS; solo se contempla correo electrónico.
+
+### Out of Scope del MVP (TP)
+
+- Implementación de notificaciones automáticas por email (FR-024, FR-031, SC-004) en esta entrega MVP.
+- Modificación de reservas por el cliente (FR-025 y escenario 2 de US6) en esta entrega MVP.
