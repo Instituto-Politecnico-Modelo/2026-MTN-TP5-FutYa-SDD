@@ -122,20 +122,24 @@ El sistema debe integrar una pasarela de pago real para cobrar al cliente al con
 
 ```
 1. Cliente confirma reserva en NuevaReserva.tsx
-2. POST /api/pagos/iniciar { reservaId }
+2. POST /api/reservas { turnoId, fecha }
+   → ReservaService.crearReserva(...)
    → PagoService.iniciarPago(reservaId)
    → SDK: MercadoPago.preference().create({ ... })
-   ← { redirectUrl: "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=..." }
-3. Frontend redirige al checkout de Mercado Pago (init_point)
+   ← ReservaConPagoResponse { ..., pagoRedirectUrl }
+3. Frontend redirige al checkout de Mercado Pago usando pagoRedirectUrl
 4. Usuario completa el pago en el entorno de MP
 5. MP llama al webhook configurado:
    POST /api/pagos/webhook (IP de Mercado Pago, sin JWT)
    → PagoService.procesarWebhook(notification)
    → Actualiza Pago.estado → CONFIRMADO
    → Actualiza Reserva.estado → CONFIRMADA
-   → Envía notificación de confirmación al cliente (email)
+   → Envía notificación de confirmación al cliente (email, post-MVP)
 6. Frontend: al regresar desde MP, consulta GET /api/reservas/mis-reservas
    para mostrar el estado actualizado
+
+Nota: `POST /api/pagos/iniciar` se conserva como endpoint alternativo para
+reintentos sobre reservas pendientes o uso administrativo.
 ```
 
 ### Flujo de Reembolso (Cancelación > 24 hs)

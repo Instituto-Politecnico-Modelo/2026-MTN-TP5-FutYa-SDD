@@ -1,0 +1,74 @@
+services:
+  db:
+    image: mysql:8.0
+    container_name: futya-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - futya-db-data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - futya-net
+
+  backend:
+    build:
+      context: ../2026-MTN-TP3-Back-Miceli-Tabuada/backEnd
+      dockerfile: Dockerfile
+    container_name: futya-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/${MYSQL_DATABASE}?createDatabaseIfNotExist=true&serverTimezone=UTC
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS}
+      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
+      OPENWEATHER_LAT: ${OPENWEATHER_LAT}
+      OPENWEATHER_LON: ${OPENWEATHER_LON}
+      MERCADOPAGO_ACCESS_TOKEN: ${MERCADOPAGO_ACCESS_TOKEN}
+      MERCADOPAGO_WEBHOOK_SECRET: ${MERCADOPAGO_WEBHOOK_SECRET}
+      MERCADOPAGO_SUCCESS_URL: ${MERCADOPAGO_SUCCESS_URL}
+      MERCADOPAGO_FAILURE_URL: ${MERCADOPAGO_FAILURE_URL}
+      MERCADOPAGO_PENDING_URL: ${MERCADOPAGO_PENDING_URL}
+      MERCADOPAGO_NOTIFICATION_URL: ${MERCADOPAGO_NOTIFICATION_URL}
+      RESERVA_PAGO_TIMEOUT_MINUTOS: ${RESERVA_PAGO_TIMEOUT_MINUTOS:-15}
+    ports:
+      - "8081:8081"
+    networks:
+      - futya-net
+
+  frontend:
+    build:
+      context: ../2026-MTN-TP3-Front-Miceli-Tabuada
+      dockerfile: Dockerfile
+    container_name: futya-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+    networks:
+      - futya-net
+
+volumes:
+  futya-db-data:
+    driver: local
+
+networks:
+  futya-net:
+    driver: bridge

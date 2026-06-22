@@ -174,6 +174,7 @@ Representa la **instancia concreta** de un turno para una fecha de calendario es
 | `estado` | `ENUM(...)` | NOT NULL, DEFAULT 'PENDIENTE' | Estado de la reserva |
 | `motivo_cancelacion` | `VARCHAR(500)` | NULL | Motivo (obligatorio si cancela el admin) |
 | `cancelado_por_admin` | `TINYINT(1)` | NOT NULL, DEFAULT 0 | Flag para distinguir tipo de cancelación |
+| `cancelado_por_usuario_id` | `BIGINT` | NULL, FK → usuarios.id | Administrador que realizó la cancelación |
 | `fecha_creacion` | `TIMESTAMP` | NOT NULL, DEFAULT CURRENT_TIMESTAMP | Fecha de creación de la reserva |
 | `fecha_modificacion` | `TIMESTAMP` | NULL, ON UPDATE CURRENT_TIMESTAMP | Última modificación |
 | `usuario_id` | `BIGINT` | NOT NULL, FK → usuarios.id | Cliente que hizo la reserva |
@@ -186,6 +187,7 @@ CREATE TABLE reservas (
     estado               ENUM('PENDIENTE','CONFIRMADA','CANCELADA') NOT NULL DEFAULT 'PENDIENTE',
     motivo_cancelacion   VARCHAR(500),
     cancelado_por_admin  TINYINT(1)   NOT NULL DEFAULT 0,
+    cancelado_por_usuario_id BIGINT,
     fecha_creacion       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     fecha_modificacion   TIMESTAMP    NULL ON UPDATE CURRENT_TIMESTAMP,
     usuario_id           BIGINT       NOT NULL,
@@ -198,6 +200,9 @@ CREATE TABLE reservas (
         ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT fk_reservas_turno
         FOREIGN KEY (turno_id) REFERENCES turnos (id)
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+    CONSTRAINT fk_reservas_cancelado_por_usuario
+        FOREIGN KEY (cancelado_por_usuario_id) REFERENCES usuarios (id)
         ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
@@ -209,6 +214,7 @@ CREATE TABLE reservas (
 CREATE INDEX idx_reservas_usuario_estado ON reservas (usuario_id, estado);
 CREATE INDEX idx_reservas_fecha          ON reservas (fecha);
 CREATE INDEX idx_reservas_estado_creacion ON reservas (estado, fecha_creacion);
+CREATE INDEX idx_reservas_cancelado_por_usuario ON reservas (cancelado_por_usuario_id);
 ```
 El índice `idx_reservas_estado_creacion` optimiza el job de timeout de pagos pendientes.
 
@@ -322,7 +328,7 @@ WHERE r.estado = 'PENDIENTE'
 -- Usuario administrador por defecto (contraseña: Admin1234! en BCrypt)
 INSERT INTO usuarios (dni, nombre, apellido, email, password, telefono, rol, activo)
 VALUES ('00000000', 'Admin', 'FutYa', 'admin@futya.com',
-        '$2a$12$hashedpassword...', NULL, 'ADMINISTRADOR', 1);
+    '<bcrypt generado por la app para Admin1234!>', NULL, 'ADMINISTRADOR', 1);
 
 -- Canchas de ejemplo
 INSERT INTO canchas (nombre, tipo, descripcion, activa) VALUES
@@ -341,3 +347,4 @@ INSERT INTO turnos (dia_semana, hora_inicio, hora_fin, disponible, cancha_id) VA
 ```
 
 > El seed completo se implementa en `DataSeeder.java` usando `CommandLineRunner` con perfil `dev`.
+> La contraseña del admin debe generarse en runtime con `BCryptPasswordEncoder.encode("Admin1234!")` y no hardcodear un hash placeholder inválido.

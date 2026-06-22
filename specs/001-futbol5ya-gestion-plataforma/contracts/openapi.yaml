@@ -164,6 +164,7 @@ paths:
         El turno debe estar disponible y no reservado para esa fecha.
         Responde con la reserva creada en estado PENDIENTE junto con la URL
         de redirección al checkout de Mercado Pago.
+        Este es el flujo principal de pago para el frontend en MVP.
       requestBody:
         required: true
         content:
@@ -607,8 +608,9 @@ paths:
       summary: Cancelar reserva de cualquier cliente (Admin)
       description: |
         El administrador cancela una reserva activa. Se requiere un motivo.
-        El cliente recibe notificación por email con el motivo de la cancelación.
-        La acción queda registrada en el historial con `cancelado_por_admin = true`.
+        El cliente recibe notificación por email con el motivo de la cancelación (post-MVP).
+        La acción queda registrada en el historial con `cancelado_por_admin = true`
+        y el identificador del administrador que ejecutó la cancelación.
       parameters:
         - $ref: '#/components/parameters/ReservaId'
       requestBody:
@@ -642,6 +644,9 @@ paths:
       description: |
         Crea una preferencia de pago en Mercado Pago para la reserva indicada
         y devuelve la URL de redirección al checkout.
+        En MVP, el frontend usa como flujo principal `POST /api/reservas`, que
+        ya retorna `pagoRedirectUrl`. Este endpoint queda disponible para
+        reintentos de reservas pendientes o uso administrativo.
       requestBody:
         required: true
         content:
@@ -1101,6 +1106,12 @@ components:
         canceladoPorAdmin:
           type: boolean
           example: false
+        canceladoPorUsuarioId:
+          type: integer
+          format: int64
+          nullable: true
+          description: ID del administrador que canceló la reserva (si aplica)
+          example: 1
         fechaCreacion:
           type: string
           format: date-time
