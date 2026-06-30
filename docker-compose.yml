@@ -23,7 +23,7 @@ services:
 
   backend:
     build:
-      context: ../2026-MTN-TP3-Back-Miceli-Tabuada/backEnd
+      context: ./2026-MTN-TP3-Back-Miceli-Tabuada/backEnd
       dockerfile: Dockerfile
     container_name: futya-backend
     restart: unless-stopped
@@ -54,7 +54,7 @@ services:
 
   frontend:
     build:
-      context: ../2026-MTN-TP3-Front-Miceli-Tabuada
+      context: ./2026-MTN-TP3-Front-Miceli-Tabuada
       dockerfile: Dockerfile
     container_name: futya-frontend
     restart: unless-stopped
